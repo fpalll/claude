@@ -122,3 +122,144 @@ HF evaluation assumes JSON tool calls
 sglang + Qwen sometimes outputs XML-style calls
 👉 This is NOT your bug
 👉 This is model + runtime interaction issue
+
+How to add Qwen3.5-35B-A3B (and 27B) to the official BFCL code
+Step 1 — Clone and install
+
+git clone https://github.com/ShishirPatil/gorilla.git
+cd gorilla/berkeley-function-call-leaderboard
+pip install -e ".[all]"
+Step 2 — Edit bfcl_eval/constants/model_config.py
+Open the file. Search for "Qwen/Qwen3-30B-A3B-Instruct-2507-FC" — that is the closest existing MoE Qwen entry. Add your new entries directly after it inside the local_inference_model_map dictionary:
+
+
+    # ── Qwen3.5-27B (dense) ─────────────────────────────────────────────────
+    "Qwen/Qwen3.5-27B-FC": ModelConfig(
+        model_name="Qwen/Qwen3.5-27B",
+        display_name="Qwen3.5-27B (FC)",
+        url="https://huggingface.co/Qwen/Qwen3.5-27B",
+        org="Qwen",
+        license="apache-2.0",
+        model_handler=QwenFCHandler,
+        input_price=None,
+        output_price=None,
+        is_fc_model=True,
+        underscore_to_dot=False,
+    ),
+    "Qwen/Qwen3.5-27B": ModelConfig(
+        model_name="Qwen/Qwen3.5-27B",
+        display_name="Qwen3.5-27B (Prompt)",
+        url="https://huggingface.co/Qwen/Qwen3.5-27B",
+        org="Qwen",
+        license="apache-2.0",
+        model_handler=QwenHandler,
+        input_price=None,
+        output_price=None,
+        is_fc_model=False,
+        underscore_to_dot=False,
+    ),
+    # ── Qwen3.5-35B-A3B (MoE) ───────────────────────────────────────────────
+    "Qwen/Qwen3.5-35B-A3B-FC": ModelConfig(
+        model_name="Qwen/Qwen3.5-35B-A3B",
+        display_name="Qwen3.5-35B-A3B (FC)",
+        url="https://huggingface.co/Qwen/Qwen3.5-35B-A3B",
+        org="Qwen",
+        license="apache-2.0",
+        model_handler=QwenFCHandler,
+        input_price=None,
+        output_price=None,
+        is_fc_model=True,
+        underscore_to_dot=False,
+    ),
+    "Qwen/Qwen3.5-35B-A3B": ModelConfig(
+        model_name="Qwen/Qwen3.5-35B-A3B",
+        display_name="Qwen3.5-35B-A3B (Prompt)",
+        url="https://huggingface.co/Qwen/Qwen3.5-35B-A3B",
+        org="Qwen",
+        license="apache-2.0",
+        model_handler=QwenHandler,
+        input_price=None,
+        output_price=None,
+        is_fc_model=False,
+        underscore_to_dot=False,
+    ),
+Key points:
+
+The dictionary key (e.g. "Qwen/Qwen3.5-35B-A3B-FC") is the name you pass to --model on the command line.
+model_name is the actual HuggingFace path that gets loaded — it has no -FC suffix.
+FC variant → QwenFCHandler, is_fc_model=True (uses native tool-call format).
+Prompt variant → QwenHandler, is_fc_model=False (uses text-based tool calling).
+Step 3 — Edit bfcl_eval/constants/supported_models.py
+Open the file. Search for "Qwen/Qwen3-30B-A3B-Instruct-2507-FC" and add your four model keys right after it inside the SUPPORTED_MODELS list:
+
+
+    "Qwen/Qwen3.5-27B-FC",
+    "Qwen/Qwen3.5-27B",
+    "Qwen/Qwen3.5-35B-A3B-FC",
+    "Qwen/Qwen3.5-35B-A3B",
+The keys here must exactly match the dictionary keys in model_config.py.
+
+Step 4 — Set environment variables
+These tell BFCL to use your already-running SGLang server instead of launching its own:
+
+
+export LOCAL_SERVER_ENDPOINT=http://127.0.0.1
+export LOCAL_SERVER_PORT=18000
+Step 5 — Start SGLang (if not already running)
+For 35B-A3B:
+
+
+python -m sglang.launch_server \
+  --model-path Qwen/Qwen3.5-35B-A3B \
+  --tp 2 \
+  --host 0.0.0.0 \
+  --port 18000 \
+  --reasoning-parser qwen3 \
+  --tool-call-parser qwen3_coder \
+  --mem-fraction-static 0.90 &
+Wait until ready: curl http://127.0.0.1:18000/v1/models
+
+Step 6 — Run the evaluation
+Generate model outputs (this sends questions to SGLang):
+
+
+# 35B-A3B using function-calling handler (recommended)
+python -m bfcl generate \
+  --model "Qwen/Qwen3.5-35B-A3B-FC" \
+  --test-category web_search \
+  --num-gpus 2 \
+  --backend sglang \
+  --skip-server-setup
+
+# 27B using function-calling handler
+python -m bfcl generate \
+  --model "Qwen/Qwen3.5-27B-FC" \
+  --test-category web_search \
+  --num-gpus 2 \
+  --backend sglang \
+  --skip-server-setup
+Score the outputs:
+
+
+python -m bfcl evaluate \
+  --model "Qwen/Qwen3.5-35B-A3B-FC" \
+  --test-category web_search
+
+python -m bfcl evaluate \
+  --model "Qwen/Qwen3.5-27B-FC" \
+  --test-category web_search
+Results appear in score/ directory. The web_search category target is 68.5% for Qwen3.5-27B.
+
+Quick verification (before running the full eval)
+Check your edits didn't break the import:
+
+
+python -c "
+from bfcl_eval.constants.model_config import MODEL_CONFIG_MAPPING
+keys = [k for k in MODEL_CONFIG_MAPPING if 'Qwen3.5' in k]
+print('Registered:', keys)
+"
+Expected output:
+
+
+Registered: ['Qwen/Qwen3.5-27B-FC', 'Qwen/Qwen3.5-27B', 'Qwen/Qwen3.5-35B-A3B-FC', 'Qwen/Qwen3.5-35B-A3B']
