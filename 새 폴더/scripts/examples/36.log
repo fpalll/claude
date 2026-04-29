@@ -1,0 +1,60 @@
+Assigned subjects: business, law, psychology, biology, chemistry, history, 
+other, health, economics, math, physics, computer science, philosophy, 
+engineering
+Using uvloop
+
+Terminal not available - running in non-interactive mode
+
+  Final Accuracy for business: 88.85% (701/789)
+
+Terminal not available - running in non-interactive mode
+
+  Final Accuracy for law: 69.21% (762/1101)
+
+Terminal not available - running in non-interactive mode
+
+  Final Accuracy for psychology: 85.46% (682/798)
+
+Terminal not available - running in non-interactive mode
+
+  Final Accuracy for biology: 92.05% (660/717)
+
+Terminal not available - running in non-interactive mode
+
+  Final Accuracy for chemistry: 90.02% (1019/1132)
+
+Terminal not available - running in non-interactive mode
+
+  Final Accuracy for history: 75.59% (288/381)
+
+Terminal not available - running in non-interactive mode
+
+  Final Accuracy for other: 78.68% (727/924)
+
+Terminal not available - running in non-interactive mode
+
+  Final Accuracy for health: 79.71% (652/818)
+
+Terminal not available - running in non-interactive mode
+
+  Final Accuracy for economics: 87.91% (742/844)
+
+Terminal not available - running in non-interactive mode
+
+  Final Accuracy for math: 94.74% (1280/1351)
+
+Terminal not available - running in non-interactive mode
+
+  Final Accuracy for physics: 91.07% (1183/1299)
+
+Terminal not available - running in non-interactive mode
+
+  Final Accuracy for computer science: 87.80% (360/410)
+
+Terminal not available - running in non-interactive mode
+
+  Final Accuracy for philosophy: 82.36% (411/499)
+
+Terminal not available - running in non-interactive mode
+
+  Final Accuracy for engineering: 80.70% (782/969)
