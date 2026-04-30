@@ -1,0 +1,304 @@
+================================================================================
+Berkeley Function Calling Leaderboard (BFCL) — Step-by-step runbook
+SGLang / vLLM / Hugging Face Transformers (OpenAI-compatible servers)
+================================================================================
+
+Workspace layout (adjust if yours differs):
+  BFCL repo:     .../gorilla/berkeley-function-call-leaderboard
+  Your scripts:  .../qwen/run_sglang.sh   .../qwen/run_vllm.sh
+
+This document assumes you self-host Qwen (e.g. Qwen3.6-27B, Qwen3.5-35B-A3B) and
+run BFCL’s CLI against an already-running server (--skip-server-setup).
+
+
+--------------------------------------------------------------------------------
+0) Critical: model name must match BFCL
+--------------------------------------------------------------------------------
+
+BFCL’s local Qwen FC path calls the OpenAI-compatible **legacy Completions** API
+(`/v1/completions`) with:
+
+  model = <the Hugging Face model id from bfcl_eval constants>
+
+Example registry ids (use the one you registered in bfcl, usually):
+
+  Qwen/Qwen3.6-27B-FC     -> underlying weights id: Qwen/Qwen3.6-27B
+  Qwen/Qwen3.5-35B-A3B-FC -> Qwen/Qwen3.5-35B-A3B
+  Qwen/Qwen3.6-35B-A3B-FC -> Qwen/Qwen3.6-35B-A3B
+
+Your `run_sglang.sh` / `run_vllm.sh` may set a short `--served-model-name` (e.g.
+qwen3_6_27b). For BFCL, either:
+
+  (A) Set --served-model-name to the **same string** as the Hugging Face id
+      above (recommended), e.g. --served-model-name Qwen/Qwen3.6-27B
+
+  OR
+
+  (B) Keep your short name and configure the inference engine to **also** accept
+      the HF id as an alias (if your stack supports multiple served names).
+
+If the served name does not match what BFCL sends, completions requests will 404.
+
+
+--------------------------------------------------------------------------------
+1) One-time: install BFCL and Python env
+--------------------------------------------------------------------------------
+
+  conda create -n BFCL python=3.10 -y
+  conda activate BFCL
+
+  cd /path/to/gorilla/berkeley-function-call-leaderboard
+  pip install -e .
+
+Pick **one** extra for launching servers from BFCL (optional here — you use
+external servers instead):
+
+  pip install -e .[oss_eval_sglang]    # if you ever let bfcl start sglang
+  # or
+  pip install -e .[oss_eval_vllm]
+
+You still need: openai, requests, etc. (pulled in by the package).
+
+
+--------------------------------------------------------------------------------
+2) One-time: project config (.env)
+--------------------------------------------------------------------------------
+
+  cd /path/to/gorilla/berkeley-function-call-leaderboard
+  cp bfcl_eval/.env.example .env
+
+Edit `.env`:
+
+  (a) Point BFCL at your running API (see section 3 for exact URL).
+
+      REMOTE_OPENAI_BASE_URL=http://127.0.0.1:<HOST_PORT>/v1
+      REMOTE_OPENAI_API_KEY=EMPTY
+
+      If the server is only reachable as localhost with a mapped Docker port,
+      use that host port (example from qwen/run_sglang.sh: PORT=50040 -> URL below).
+
+  (b) Web search categories (only if you run web_search_* / all_scoring):
+
+      Using **Serper.dev** (recommended here): sign up at https://serper.dev ,
+      create an API key, then in `.env` set:
+
+      WEB_SEARCH_BACKEND=serper
+      SERPER_API_KEY=<your_serper_key>
+
+      BFCL maps Serper’s `organic` results into the same shape as the legacy
+      SerpAPI path (`bfcl_eval/.../web_search.py`). Free tier limits apply — use
+      exponential backoff if you hit 429s.
+
+      Optional fallback: leave `WEB_SEARCH_BACKEND` unset or `serpapi` and set
+      `SERPAPI_API_KEY` instead.
+
+  (c) Optional: tokenizer override when using REMOTE_*
+
+      REMOTE_OPENAI_TOKENIZER_PATH=Qwen/Qwen3.6-27B
+
+  (d) Optional: Hugging Face cache / auth for downloading tokenizer weights
+
+      huggingface-cli login
+
+
+--------------------------------------------------------------------------------
+3) Match server URL to BFCL (after you start SGLang / vLLM / transformers)
+--------------------------------------------------------------------------------
+
+Example matching **qwen/run_sglang.sh** (host PORT=50040 maps to container 80):
+
+  export REMOTE_OPENAI_BASE_URL=http://127.0.0.1:50040/v1
+  export REMOTE_OPENAI_API_KEY=EMPTY
+
+Put these in `.env` or export them in the shell **before** `bfcl generate`.
+
+Alternative without REMOTE_* (BFCL default localhost:1053):
+
+  LOCAL_SERVER_ENDPOINT=127.0.0.1
+  LOCAL_SERVER_PORT=1053
+
+  …and run your server on port 1053. Most users with Docker prefer REMOTE_* +
+  the published host port (50040, 50038, 8000, etc.).
+
+
+--------------------------------------------------------------------------------
+4A) Start SGLang (aligned with qwen/run_sglang.sh)
+--------------------------------------------------------------------------------
+
+Your script pattern (Docker + sglang, host port -> container):
+
+  PORT=50040
+  # ... docker run -p $PORT:80 ... lmsysorg/sglang:...
+  #     python -m sglang.launch_server --model-path ... --port 80 ...
+
+For BFCL you should:
+
+  - Use a **context length** large enough for long multi-turn prompts (e.g. 128k
+    or 262k if VRAM allows); your script uses --context-length 131072 — OK to start.
+  - Keep Qwen-oriented flags if your build supports them:
+      --reasoning-parser qwen3
+      --tool-call-parser qwen3_coder   # optional for BFCL’s FC harness (BFCL uses
+                                        completions + manual prompts for Qwen FC)
+  - Set --served-model-name to the Hugging Face id (section 0).
+
+Example **bare-metal** (no Docker), mirrors your flags conceptually:
+
+  python -m sglang.launch_server \
+    --model-path Qwen/Qwen3.6-27B \
+    --port 8000 \
+    --host 0.0.0.0 \
+    --tp-size <NGPU> \
+    --mem-fraction-static 0.85 \
+    --context-length 131072 \
+    --reasoning-parser qwen3 \
+    --dtype bfloat16 \
+    --served-model-name Qwen/Qwen3.6-27B
+
+Then set:
+
+  REMOTE_OPENAI_BASE_URL=http://127.0.0.1:8000/v1
+
+Wait until GET http://127.0.0.1:8000/v1/models returns 200.
+
+
+--------------------------------------------------------------------------------
+4B) Start vLLM (aligned with qwen/run_vllm.sh)
+--------------------------------------------------------------------------------
+
+Your script maps host PORT=50038 -> container 8000 and uses vllm-openai image.
+
+Conceptual launch:
+
+  vllm serve Qwen/Qwen3.6-27B \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --tensor-parallel-size <NGPU> \
+    --gpu-memory-utilization 0.9 \
+    --dtype bfloat16 \
+    --trust-remote-code \
+    --max-model-len 131072 \
+    --reasoning-parser qwen3 \
+    --served-model-name Qwen/Qwen3.6-27B
+
+(Optional tool flags — not required for BFCL Qwen FC completions path:)
+
+    --enable-auto-tool-choice --tool-call-parser qwen3_coder
+
+(Text-only VRAM savings if supported: --language-model-only)
+
+BFCL `.env`:
+
+  REMOTE_OPENAI_BASE_URL=http://127.0.0.1:50038/v1   # if you keep your docker -p
+
+Verify: curl -s http://127.0.0.1:50038/v1/models
+
+
+--------------------------------------------------------------------------------
+4C) Start Hugging Face Transformers “serve”
+--------------------------------------------------------------------------------
+
+Requires a recent transformers with OpenAI-compatible server + /v1/completions.
+
+  pip install "transformers[serving]"
+  # torch / torchvision / pillow as needed for Qwen-VL family
+
+  transformers serve Qwen/Qwen3.6-27B \
+    --port 8000 \
+    --continuous-batching
+
+Set:
+
+  REMOTE_OPENAI_BASE_URL=http://127.0.0.1:8000/v1
+
+Note: large MoE/VL models are heavy; multi-GPU or quantization may be required.
+
+
+--------------------------------------------------------------------------------
+5) Choose test scope
+--------------------------------------------------------------------------------
+
+Full scoring leaderboard-style (includes memory + web search):
+
+  --test-category all_scoring
+
+Same but **no** web search (no Serper / SerpAPI key):
+
+  --test-category all_scoring_no_web_search
+
+See TEST_CATEGORIES.md and:  bfcl test-categories
+
+
+--------------------------------------------------------------------------------
+6) Generate model outputs (inference)
+--------------------------------------------------------------------------------
+
+Pick the FC registry name that matches your weights (examples):
+
+  MODEL="Qwen/Qwen3.6-27B-FC"
+  MODEL="Qwen/Qwen3.5-35B-A3B-FC"
+  MODEL="Qwen/Qwen3.6-35B-A3B-FC"
+
+With server already running and `.env` pointing at it:
+
+  cd /path/to/gorilla/berkeley-function-call-leaderboard
+
+  bfcl generate \
+    --model "${MODEL}" \
+    --test-category all_scoring \
+    --skip-server-setup \
+    --temperature 0.001 \
+    --num-threads 1
+
+Notes:
+
+  - `--skip-server-setup` : YOU started SGLang/vLLM/transformers; BFCL only calls the API.
+  - `--num-threads` : increase only if your server tolerates parallel completions.
+  - Generation writes under ./result/ (or $BFCL_PROJECT_ROOT/result).
+
+
+--------------------------------------------------------------------------------
+7) Evaluate (AST / executable checks)
+--------------------------------------------------------------------------------
+
+  bfcl evaluate \
+    --model "${MODEL}" \
+    --test-category all_scoring
+
+If you only generated a subset:
+
+  bfcl evaluate --model "${MODEL}" --test-category ... --partial-eval
+
+Scores appear under ./score/ — summary CSVs include data_overall.csv.
+
+
+--------------------------------------------------------------------------------
+8) Quick sanity checklist
+--------------------------------------------------------------------------------
+
+  [ ] REMOTE_OPENAI_BASE_URL ends with /v1 and matches the **host** port you mapped.
+  [ ] curl ${BASE%/v1}/v1/models works.
+  [ ] Served model id == Hugging Face id in bfcl ModelConfig for that checkpoint.
+  [ ] Enough VRAM / TP size for max-model-len / context you configured.
+  [ ] Web search (for all_scoring): WEB_SEARCH_BACKEND=serper and SERPER_API_KEY set,
+      OR use all_scoring_no_web_search to skip web_search_* entirely.
+  [ ] Same MODEL string for generate and evaluate.
+
+
+--------------------------------------------------------------------------------
+9) Switching engine (SGLang vs vLLM vs Transformers) for “same” experiment
+--------------------------------------------------------------------------------
+
+Use the **same** Hugging Face weights id for --served-model-name / model-path,
+the **same** BFCL --model, --temperature, and --test-category.
+
+Only change:
+
+  - Which server binary/image you run (sections 4A / 4B / 4C).
+  - REMOTE_OPENAI_BASE_URL port if the listening port differs.
+
+Expect small score differences across engines (kernels, sampling, context).
+
+
+================================================================================
+End of BFCL_EXPERIMENT_STEPS.txt
+================================================================================
