@@ -2,6 +2,9 @@
 
 # ==============================
 # CONFIG
+vim run_bench.sh
+chmod +x run_bench.sh
+./run_bench.sh
 # ==============================
 
 MODEL="Qwen/Qwen3-35B-A3B"
